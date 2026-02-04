@@ -1,139 +1,336 @@
 import json
+import pandas as pd
+
 ranking = "ranking_animes.json"
 
 
-def carregar_animes():
-    #Carrega lista do JSON.
+def set_ranking_file(path: str):
+    # Define o arquivo JSON atual a ser usado como base de dados.
+    global ranking
+    ranking = path
+
+
+def carregar_items():
+    # Carrega lista do JSON como lista de dicts (compatibilidade antiga).
+    df = carregar_dataframe()
+    return df.to_dict(orient="records")
+
+
+def carregar_dataframe():
+    # carrega o JSON atual como DataFrame genérico.
     try:
         with open(ranking, "r", encoding="utf-8") as f:
             data = json.load(f)
-            return data if data else [] # retorna [] se vazio
     except (FileNotFoundError, json.JSONDecodeError):
-        return [] # retorna lista vazia se arquivo não existe
+        return pd.DataFrame()
+
+    if not data:
+        return pd.DataFrame()
+
+    if isinstance(data, list):
+        return pd.DataFrame(data)
+
+    elif isinstance(data, dict):
+        # para dict simples de chave->valor, cada par vira linha
+        return pd.DataFrame([{"chave": k, "valor": v} for k, v in data.items()])
+    else:
+        return pd.DataFrame()
 
 
-def salvar_lista(animes):
-    #Salva lista no JSON.
+def salvar_lista(items):
+    # Salva lista no JSON (a partir de lista de dicts).
+    df = pd.DataFrame(items)
     with open(ranking, "w", encoding="utf-8") as f:
-        json.dump(animes, f, indent=2, ensure_ascii=False)
+        json.dump(df.to_dict(orient="records"), f, indent=2, ensure_ascii=False)
 
 
-def listar_animes():
-    #Lista todos os animes (opção 1).
-    animes = carregar_animes()
+def listar_items():
+    # Lista todos os items (opção 1).
+    tabela = obter_tabela_generica()
 
-    if not animes:
-        print("📭 Nenhum anime cadastrado ainda!")
-        print("="*80)
-        return
-    
-    animes = ordenar_animes(animes)
+    if tabela.strip():
+        print(tabela)
+    else:
+        print("📭 Nenhum item cadastrado ainda!")
 
-    status_títulos = {
+
+def obter_grupos_items():
+    # Gera uma string formatada com a lista de items, por status.
+    items = carregar_items()
+
+    if not items:
+        return []
+
+    items = ordenar_items(items)
+
+    status_titulos = {
         "planejado": "⏳ PLANEJADOS",
         "assistindo": "📺 ASSISTINDO",
         "completo": "✅ COMPLETOS",
-        "dropado": "💔 DROPADOS"
+        "dropado": "💔 DROPADOS",
     }
 
-    print(f"{'#':>3} | {'NOME':<42} | {'NOTA':>5} | {'STATUS':<10}")
-    print("="*80)
-
+    grupos = []
     status_atual = None
+    grupo_atual = None
 
-    for i, anime in enumerate(animes, 1):
-        if anime["status"] != status_atual:
-            print(f"\n{status_títulos.get(anime['status'], anime['status'].upper()):^80}")
-            print('-'*80)
-            status_atual = anime["status"]
+    # verifica se algum item tem status
+    tem_status = any("status" in a for a in items)
 
-        nome_cortado = (anime["nome"][:38] + "...") if len(anime["nome"]) > 40 else anime["nome"]
+    for i, item in enumerate(items, 1):
+        nome = item.get("nome", "(sem nome)")
+        nota = item.get("nota", "")
+        status = item.get("status", "") if tem_status else ""
 
-        print(f'{i:>2}. {nome_cortado:<40} | Nota: {anime["nota"]:^5} | Status: {anime["status"]:<10}')
+        # decide agrupamento: por status se existir, senão grupo único "ITENS"
 
-    
+        if tem_status:
+            chave_status = status
+            titulo_grupo = status_titulos.get(status, status.upper() or "ITENS")
+        else:
+            chave_status = "itens"
+            titulo_grupo = "📋 ITENS"
 
-def adicionar_anime():
-    #adiciona novo anime via input() interativo.
-    print('='*100)
-    nome = input('Nome do anime: ')
-    nota = float(input('Nota: '))
-    status = input('Status (assistindo/completo/planejado): ')
+        if chave_status != status_atual:
+            # começa novo grupo
+            status_atual = chave_status  # linha em branco
+            grupo_atual = {
+                "status": status_atual,
+                "titulo": titulo_grupo,
+                "linhas": [],
+            }
+            grupos.append(grupo_atual)
 
-    animes = carregar_animes()
-    animes.append({"nome": nome, "nota": nota, "status": status})
-    animes = ordenar_animes(animes)
-    salvar_lista(animes)
-    print(f'{nome} adicionado!')
-    print('='*100)
+        # corta nome para 40 caracteres com "..." se for maior
+        if len(nome) > 40:
+            nome_cortado = nome[:37] + "..."
+        else:
+            nome_cortado = nome
+
+        # formata linha base: índice + nome
+        linha = f"{i:>3}. {nome_cortado:<40}"
+
+        # adiciona nota se existir
+        if nota != "":
+            linha += f" | {str(nota):>4}"
+
+        # adiciona status se estivermos usando status
+        if tem_status and status:
+            linha += f" | {status}"
+
+        grupo_atual["linhas"].append(linha)
+
+    return grupos
 
 
+def obter_tabela_generica():
+    # Retorna estrutura de tabela genérica: colunas, registros e larguras.
+    df = carregar_dataframe()
+    if df.empty:
+        return None
 
-def excluir_anime():
-    #exclui anime por indice (opção 3).
-    animes = carregar_animes()
-    listar_animes(animes)
+    # garante que tudo é dict
+    registros = df.to_dict(orient="records")
+
+    # descobre todas as chaves existentes
+    todas_chaves = set()
+    for r in registros:
+        todas_chaves.update(r.keys())
+
+    # ordenar chaves deixando 'nome' primeiro, 'nota' e 'status' em seguida se existirem
+    colunas = []
+    for preferida in ("nome", "nota", "status"):
+        if preferida in todas_chaves:
+            colunas.append(preferida)
+            todas_chaves.remove(preferida)
+    colunas.extend(sorted(todas_chaves))
+
+    # calcula largura de cada coluna
+    larguras = {}
+    for chave in colunas:
+        max_val = len(chave)
+        for r in registros:
+            s = str(r.get(chave, ""))
+            if len(s) > max_val:
+                max_val = len(s)
+        larguras[chave] = max_val
+
+    return {
+        "colunas": colunas,
+        "registros": registros,
+        "larguras": larguras,
+    }
+
+
+def buscar_items(consulta):
+    # busca items pelo nome (parcial, case-sensitive) e retorna lista já ordenada.
+    consulta = consulta.strip().lower()
+    if not consulta:
+        return []
+
+    items = ordenar_items(carregar_items())
+    encontrados = [item for item in items if consulta in item["nome"].lower()]
+    return encontrados
+
+
+def adicionar_item():
+    # adiciona novo item via input() interativo.
+    print("=" * 100)
+    nome = input("Nome do item: ")
+    nota = float(input("Nota: "))
+    status = input("Status (assistindo/completo/planejado): ")
+
+    items = carregar_items()
+    items.append({"nome": nome, "nota": nota, "status": status})
+    items = ordenar_items(items)
+    salvar_lista(items)
+    print(f"{nome} adicionado!")
+    print("=" * 100)
+
+
+def excluir_item():
+    # exclui item por indice (opção 3).
+    items = carregar_items()
+    listar_items(items)
     idx = int(input("indice para excluir: ")) - 1
-    if 0 <= idx < len(animes):
-        removido = animes.pop(idx)
-        animes = ordenar_animes(animes)
-        salvar_lista(animes)
+    if 0 <= idx < len(items):
+        removido = items.pop(idx)
+        items = ordenar_items(items)
+        salvar_lista(items)
         print(f'{removido["nome"]} excluído!')
-        print('='*100)
 
     else:
-        print('Índice invalido.')
-        print('='*100)
+        print("Índice invalido.")
+    print("=" * 100)
 
 
 def add_dropado():
-    #adiciona com status 'dropado' (opção 4, extensão).
-    print('='*100)
-    nome = input('Nome do anime dropado: ')
-    animes = carregar_animes()
-    animes.append({"nome": nome, "nota":"--", "status": "dropado"})
-    animes = ordenar_animes(animes)
-    salvar_lista(animes)
-    print(f'{nome} marcado como dropado.')
-    print('='*100)
+    # adiciona com status 'dropado' (opção 4, extensão).
+    print("=" * 100)
+    nome = input("Nome do item dropado: ")
+    items = carregar_items()
+    items.append({"nome": nome, "nota": "--", "status": "dropado"})
+    items = ordenar_items(items)
+    salvar_lista(items)
+    print(f"{nome} marcado como dropado.")
+    print("=" * 100)
+
 
 def add_assistir_dps():
-    #adiciona como 'planejado' (opção 5).
-    print('='*100)
-    nome = input('Nome do anime para assistir depois: ')
-    animes = carregar_animes()
-    animes.append({"nome": nome, "nota":"--", "status": "planejado"})
-    salvar_lista(animes)
-    print(f'{nome} adicionado aos planejados!')
-    print('='*100)
+    # adiciona como 'planejado' (opção 5).
+    print("=" * 100)
+    nome = input("Nome do item para assistir depois: ")
+    items = carregar_items()
+    items.append({"nome": nome, "nota": "--", "status": "planejado"})
+    salvar_lista(items)
+    print(f"{nome} adicionado aos planejados!")
+    print("=" * 100)
 
 
 def mostrar_estatisticas():
-    #total por status (opção 6)
-    animes = carregar_animes()
+    # total por status (opção 6) - modo legado
+    items = carregar_items()
     stats = {"assistindo": 0, "completo": 0, "planejado": 0, "dropado": 0}
-    for anime in animes:
-        stats[anime["status"]] += 1
-    print('='*100)
-    print("Estatísticas:")
+    for item in items:
+        stats[item.get("status", "")] = stats.get(item.get("status", ""), 0) + 1
+    print("=" * 80)
     for status, count in stats.items():
-        print(f'- {status}: {count}')
-    print('='*100)
+        print(f"- {status}: {count}")
+    print("=" * 80)
 
 
-def ordenar_animes(animes):
-    #Ordena: 1° por status (planejado->assistindo->completo->dropado), 2° por nota DESC.
+def estatisticas_genericas():
+    # Estatísticas genéricas para qualquer DataFrame.
+    df = carregar_dataframe()
+    if df.empty:
+        return "📭 Nenhum item cadastrado ainda.\n"
+    
+    linhas = []
+    
+    # tenta usar uma coluna categórica para contagem
+    # prioridade: status, categoria, tag, qualquer coluna 'object'
+    cand = None
+    for nome in ("status", "categoria", "tag"):
+        if nome in df.columns:
+            cand = nome
+            break
+    if cand is None:
+        # primeira coluna do tipo object (texto)
+        for col in df.columns:
+            if df[col].dtype == object:
+                cand = col
+                break
+    
+    if cand:
+        vc = df[cand].astype(str).value_counts()
+        linhas.append(f"Contagem por '{cand}':")
+        for valor, cnt in vc.items():
+            linhas.append(f"    - {valor}: {cnt}")
+        linhas.append("")
+    
+    # estatísticas numéricas básicas (se houver colunas numéricas)
+    df_num = df.select_dtypes(include=["number"])
+    if not df_num.empty and len(df_num.columns) > 0:
+        desc = df_num.describe()
+        if not desc.empty:
+            linhas.append("Estatísticas numméricas:")
+            linhas.append(str(desc))
+        
+    if not linhas:
+        return "📭 Nenhuma estatística disponível para este conjunto.\n"
+    
+    return "\n".join(linhas) + "\n"
+
+
+def ordenar_items(items):
+    # Ordena: 1° por status (planejado->assistindo->completo->dropado), 2° por nota DESC.
 
     # Ordem prioritária dos status (0=maior prioridade)
-    ordem_status = {
-        "planejado": 1,
-        "assistindo": 3,
-        "completo": 0,
-        "dropado": 2
-    }
+    ordem_status = {"planejado": 1, "assistindo": 3, "completo": 0, "dropado": 2}
 
-    def chave_ordenacao(anime):
-        return (ordem_status.get(anime["status"], 99), - float(anime["nota"]))
+    def chave_ordenacao(item):
+        status = item.get("status", "")
+        # nota pode não existir ou ser não numérica; usamos 0 como fallback
+        nota_val = item.get("nota", 0)
+        try:
+            nota_float = float(nota_val)
+        except (TypeError, ValueError):
+            nota_float = 0.0
+        return (ordem_status.get(status, 99), -nota_float)
 
-    return sorted(animes, key=chave_ordenacao)
-    
+    return sorted(items, key=chave_ordenacao)
+
+
+# GUI functions
+
+
+def adicionar_gui(nome, nota, status):
+    # versão GUI do add_item()
+    items = carregar_items()
+    items.append({"nome": nome, "nota": nota, "status": status})
+    items = ordenar_items(items)
+    salvar_lista(items)
+
+
+def excluir_gui(idx):
+    # exclui items por índice da GUI
+    items = carregar_items()
+    if 0 <= idx < len(items):
+        removido = items.pop(idx)
+        items = ordenar_items(items)
+        salvar_lista(items)
+        return removido["nome"]  # retorna nome pra mostrar
+    return None
+
+
+def add_dropado_gui(nome, nota):
+    items = carregar_items()
+    items.append({"nome": nome, "nota": nota, "status": "dropado"})
+    items = ordenar_items(items)
+    salvar_lista(items)
+
+
+def add_planejado_gui(nome, nota):
+    items = carregar_items()
+    items.append({"nome": nome, "nota": nota, "status": "planejado"})
+    salvar_lista(items)

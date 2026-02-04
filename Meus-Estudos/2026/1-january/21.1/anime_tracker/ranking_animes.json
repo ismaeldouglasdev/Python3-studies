@@ -335,6 +335,26 @@
     "status": "completo"
   },
   {
+    "nome": "Wistoria: Wand and Sword",
+    "nota": 0,
+    "status": "planejado"
+  },
+  {
+    "nome": "Ishura",
+    "nota": 0,
+    "status": "planejado"
+  },
+  {
+    "nome": "The Legendary Hero is Dead!",
+    "nota": 0,
+    "status": "planejado"
+  },
+  {
+    "nome": "Hametsu no Oukoku",
+    "nota": 3.0,
+    "status": "dropado"
+  },
+  {
     "nome": "The Banished Court Magician Aims to Become a Faker",
     "nota": 0,
     "status": "dropado"
@@ -370,28 +390,18 @@
     "status": "dropado"
   },
   {
-    "nome": "Wistoria: Wand and Sword",
-    "nota": 0,
-    "status": "planejado"
+    "nome": "Jigokurako Temporada 2",
+    "nota": "8",
+    "status": "assistindo"
   },
   {
-    "nome": "Ishura",
-    "nota": 0,
-    "status": "planejado"
-  },
-  {
-    "nome": "The Legendary Hero is Dead!",
-    "nota": 0,
-    "status": "planejado"
+    "nome": "Roll Over and Die",
+    "nota": 7.5,
+    "status": "assistindo"
   },
   {
     "nome": "Hell Mode: Yarikomizuki no Gamer wa Hai Settei no Isekai de Musou suru",
     "nota": "7",
-    "status": "assistindo"
-  },
-  {
-    "nome": "Jigokurako Temporada 2",
-    "nota": "8",
     "status": "assistindo"
   }
 ]
