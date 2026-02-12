@@ -13,11 +13,19 @@ def set_ranking_file(path: str):
 def carregar_items():
     # Carrega lista do JSON como lista de dicts (compatibilidade antiga).
     df = carregar_dataframe()
+
+    # garante que 'eps' (ou 'EPS') seja texto ao entregar para a lógica.
+    for col in ("eps", "EPS"):
+        if col in df.columns:
+            df[col] = df[col].astype(str)
+
     return df.to_dict(orient="records")
 
 
 def carregar_dataframe():
     # carrega o JSON atual como DataFrame genérico.
+    if not ranking:
+        return pd.DataFrame()
     try:
         with open(ranking, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -40,6 +48,12 @@ def carregar_dataframe():
 def salvar_lista(items):
     # Salva lista no JSON (a partir de lista de dicts).
     df = pd.DataFrame(items)
+
+    # garante que 'eps' (se existir) seja tratada como texto, não float.
+    for col in ("eps", "EPS"):
+        if col in df.columns:
+            df[col] = df[col].astype(str)
+
     with open(ranking, "w", encoding="utf-8") as f:
         json.dump(df.to_dict(orient="records"), f, indent=2, ensure_ascii=False)
 
@@ -80,6 +94,7 @@ def obter_grupos_items():
     for i, item in enumerate(items, 1):
         nome = item.get("nome", "(sem nome)")
         nota = item.get("nota", "")
+        eps = item.get("eps", "")
         status = item.get("status", "") if tem_status else ""
 
         # decide agrupamento: por status se existir, senão grupo único "ITENS"
@@ -109,11 +124,12 @@ def obter_grupos_items():
 
         # formata linha base: índice + nome
         linha = f"{i:>3}. {nome_cortado:<40}"
-
         # adiciona nota se existir
         if nota != "":
             linha += f" | {str(nota):>4}"
-
+        # adiciona quantidade de eps se existir
+        if eps != "":
+            linha += f" | {eps}"
         # adiciona status se estivermos usando status
         if tem_status and status:
             linha += f" | {status}"
@@ -139,7 +155,7 @@ def obter_tabela_generica():
 
     # ordenar chaves deixando 'nome' primeiro, 'nota' e 'status' em seguida se existirem
     colunas = []
-    for preferida in ("nome", "nota", "status"):
+    for preferida in ("nome", "NOME", "nota", "status", "eps", "EPS"):
         if preferida in todas_chaves:
             colunas.append(preferida)
             todas_chaves.remove(preferida)
@@ -169,7 +185,10 @@ def buscar_items(consulta):
         return []
 
     items = ordenar_items(carregar_items())
-    encontrados = [item for item in items if consulta in item["nome"].lower()]
+    encontrados = []
+    for item in items:
+        if any(consulta in str(v).lower() for v in item.values()):
+            encontrados.append(item)
     return encontrados
 
 
@@ -239,14 +258,14 @@ def mostrar_estatisticas():
     print("=" * 80)
 
 
-def estatisticas_genericas():
+def estatisticas_genericas(coluna=None):
     # Estatísticas genéricas para qualquer DataFrame.
     df = carregar_dataframe()
     if df.empty:
         return "📭 Nenhum item cadastrado ainda.\n"
-    
+
     linhas = []
-    
+
     # tenta usar uma coluna categórica para contagem
     # prioridade: status, categoria, tag, qualquer coluna 'object'
     cand = None
@@ -260,25 +279,25 @@ def estatisticas_genericas():
             if df[col].dtype == object:
                 cand = col
                 break
-    
+
     if cand:
         vc = df[cand].astype(str).value_counts()
         linhas.append(f"Contagem por '{cand}':")
         for valor, cnt in vc.items():
             linhas.append(f"    - {valor}: {cnt}")
         linhas.append("")
-    
+
     # estatísticas numéricas básicas (se houver colunas numéricas)
     df_num = df.select_dtypes(include=["number"])
     if not df_num.empty and len(df_num.columns) > 0:
         desc = df_num.describe()
         if not desc.empty:
-            linhas.append("Estatísticas numméricas:")
+            linhas.append("Estatísticas numéricas:")
             linhas.append(str(desc))
-        
+
     if not linhas:
         return "📭 Nenhuma estatística disponível para este conjunto.\n"
-    
+
     return "\n".join(linhas) + "\n"
 
 
@@ -334,3 +353,31 @@ def add_planejado_gui(nome, nota):
     items = carregar_items()
     items.append({"nome": nome, "nota": nota, "status": "planejado"})
     salvar_lista(items)
+
+
+def salvar_tabela_generica(texto_tabela: str):
+    """Recebe texto de uma tabela genérica (como exibida na GUI) e salva no JSON.
+
+    A primeira linha deve conter os nomes das colunas separados por " | ".
+    As linhas seguintes devem conter valores nas mesmas posições."""
+    linhas = [l for l in texto_tabela.splitlines() if l.strip()]
+    if len(linhas) < 2:
+        return  # nada para salvar
+
+    # primeira linha: cabeçalho
+    header = linhas[0]
+    colunas = [h.strip() for h in header.split("|")]
+
+    novos_registros = []
+    for linha in linhas[1:]:
+        partes = [p for p in linha.split("|")]
+        # ignora linhas que não têm a mesma quantidade de colunas
+        if len(partes) != len(colunas):
+            continue
+        registro = {}
+        for chave, valor in zip(colunas, partes):
+            registro[chave.strip()] = valor.strip()
+        novos_registros.append(registro)
+
+    if novos_registros:
+        salvar_lista(novos_registros)

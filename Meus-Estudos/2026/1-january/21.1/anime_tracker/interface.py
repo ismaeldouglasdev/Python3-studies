@@ -4,6 +4,8 @@ from tkinter import ttk, messagebox
 import logica
 import importlib
 import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 importlib.reload(logica)
 ctk.set_appearance_mode("dark")
@@ -15,30 +17,38 @@ class ItemTrackerGUI:
         self.root = root
         self.root.title("🗂️ PeakVault")
         self.root.geometry("900x700")
-        self.root.configure(fg_color="#1a1a2e")
+        self.root.configure(fg_color="#101018")
 
-        # arquivo JSON atual (padrão: lista de items)
-        self.current_file = "ranking_animes.json"
-        logica.set_ranking_file(self.current_file)
+        # arquivo JSON atual (inicia vazio, nada carregado)
+        self.current_file = None
+        logica.set_ranking_file(None)
 
-        self.items = logica.carregar_items()
+        self.items = []
+        self.columns = []
 
-        self.columns = list(logica.carregar_dataframe().columns)
         # flag: arquivo atual é "tipo anime" (tem nome/nota/status)?
-        self.is_anime_like = {"nome", "nota", "status"}.issubset(set(self.columns))
+        self.is_anime_like = False
         self.group_field = None
+
+        # suporte genérico a múltiplos GIFs no left-frame
+        self.left_gif_label = None
+        self.left_gif_sets = []  # lista de listas de frames
+        self.left_gif_index = 0  # índice do gif atual
+        self.left_gif_frame_index = 0  # índice do frame dentro do gif atual
 
         self.criar_interface()
 
     def criar_interface(self):
 
         # Frame principal
-        main_frame = ctk.CTkFrame(self.root, corner_radius=15)
+        main_frame = ctk.CTkFrame(self.root, corner_radius=15, fg_color="#151525")
         main_frame.pack(fill="both", expand=True, padx=10, pady=20)
 
         # Botões (Esquerda (30%))
-        left_frame = ctk.CTkFrame(main_frame, width=240, corner_radius=15)
-        left_frame.pack(side="left", fill="y", padx=(0, 10))
+        left_frame = ctk.CTkFrame(
+            main_frame, width=280, height=620, corner_radius=15, fg_color="#14141f"
+        )
+        left_frame.pack(side="left", padx=(10, 10), pady=5)
         left_frame.pack_propagate(False)  # fixa largura 250px
 
         # Título
@@ -70,10 +80,11 @@ class ItemTrackerGUI:
             text="🔍 Pesquisar",
             command=self.pesquisar_item,
             height=28,
-            width=120,
+            width=110,
             corner_radius=8,
+            fg_color="#202840",
             font=ctk.CTkFont(size=11, weight="bold"),
-        ).pack(pady=(0, 12), padx=16)
+        ).pack(pady=(0, 12), padx=12)
 
         # criamos os botões individualmente para poder esconder/mostrar alguns
         self.botao_defs = []
@@ -83,16 +94,17 @@ class ItemTrackerGUI:
                 left_frame,
                 text=texto,
                 command=lambda c=comando, b=None: None,  # placeholder
-                height=34,
-                width=200,
-                corner_radius=10,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                hover_color="#00abce",
+                height=28,
+                width=180,
+                corner_radius=8,
+                font=ctk.CTkFont(size=11, weight="bold"),
+                fg_color="#202840",
+                hover_color="#264f73",
             )
             btn.configure(
                 command=lambda c=comando, b=btn: self.animar_botao_click(b, c)
             )
-            btn.pack(pady=5, padx=16)
+            btn.pack(pady=3, padx=10)
             if attr_name:
                 setattr(self, attr_name, btn)
             self.botao_defs.append(btn)
@@ -111,10 +123,50 @@ class ItemTrackerGUI:
             self.btn_dropado.pack_forget()
             self.btn_planejado.pack_forget()
 
+        # GIFs no espaço vazio abaixo dos botões (N gifs alternando)
+        try:
+            # lista de caminhos de gifs que você quer usar
+            gif_paths = [
+                "gifs/pixel.gif",
+                "gifs/cyberpunk-rain.gif",
+                "gifs/ezgif.com-optimize (1).gif",
+                "gifs/disc-resize.gif",
+                "gifs/error-.gif",
+            ]
+            self.left_gif_sets = []
+
+            for path in gif_paths:
+                frames = []
+                for i in range(300):  # limite de frames por gif
+                    try:
+                        frame = tk.PhotoImage(file=path, format=f"gif -index {i}")
+                        frames.append(frame)
+                    except tk.TclError:
+                        break
+                if frames:
+                    self.left_gif_sets.append(frames)
+
+            if self.left_gif_sets:
+                self.left_gif_label = tk.Label(
+                    left_frame,
+                    image=self.left_gif_sets[0][0],
+                    bg="#14141f",
+                    borderwidth=0,
+                    highlightthickness=0,
+                )
+                # posiciona no fundo, abaixo dos botões
+                self.left_gif_label.pack(side="bottom", pady=(4, 8), padx=(10, 10))
+                self.animar_gifs_left()
+        except Exception as e:
+            print("Erro ao carregar GIF:", e)
+            # se não conseguir carregar o gif, ignora e segue sem fundo animado
+            self.left_gif_sets = []
+            self.left_gif_label = None
+
         # Área de texto (lista + stats)
         # === direita: output (70%)
 
-        right_frame = ctk.CTkFrame(main_frame, corner_radius=15)
+        right_frame = ctk.CTkFrame(main_frame, corner_radius=15, fg_color="#181828")
         right_frame.pack(side="right", fill="both", expand=True, padx=(5, 10))
 
         # Título output
@@ -124,15 +176,15 @@ class ItemTrackerGUI:
         ).pack(pady=(18, 6))
 
         # painel de agrupamento
-        group_frame = ctk.CTkFrame(right_frame, fg_color="#333333")
+        group_frame = ctk.CTkFrame(right_frame, fg_color="#202035")
         group_frame.pack(fill="x", pady=5, padx=(5, 10))
-        
+
         ctk.CTkLabel(
             group_frame,
             text="Agrupar por:",
             font=ctk.CTkFont(size=11),
         ).pack(side="left", padx=(4, 4))
-        
+
         self.group_var = ctk.StringVar(value="")
         self.group_combo = ctk.CTkComboBox(
             group_frame,
@@ -141,25 +193,38 @@ class ItemTrackerGUI:
             height=26,
             corner_radius=8,
             state="readonly",
-            values=self.columns if self.columns else [],
+            values=self.columns or [],
         )
         self.group_combo.pack(side="left", padx=(0, 8))
-        
+
         ctk.CTkButton(
             group_frame,
             text="Aplicar",
             width=70,
             height=26,
             corner_radius=8,
+            fg_color="#313150",
             font=ctk.CTkFont(size=11),
             command=self.aplicar_agrupamento,
         ).pack(side="left")
-        
+
+        ctk.CTkButton(
+            group_frame,
+            text="📊 Gráfico",
+            width=80,
+            height=26,
+            corner_radius=8,
+            fg_color="#313150",
+            font=ctk.CTkFont(size=11),
+            command=self.mostrar_grafico_stats,
+        ).pack(side="left")
+
         self.text_area = ctk.CTkTextbox(
             right_frame,
             height=460,
             corner_radius=10,
             font=ctk.CTkFont(family="Consolas", size=13),
+            fg_color="#14141f",
         )
         self.text_area.pack(fill="both", expand=True, padx=8, pady=(0, 16))
 
@@ -172,8 +237,29 @@ class ItemTrackerGUI:
             textvariable=self.status_var,
             font=ctk.CTkFont(size=12),
             anchor="w",
+            fg_color="#202035",
         )
         self.status_bar.pack(fill="x", side="bottom", padx=10, pady=(0, 10))
+
+    def animar_gifs_left(self, delay=400):
+        """Atualiza o frame do GIF gifs_left no canto inferior do left_frame."""
+        if not self.left_gif_sets or not self.left_gif_label:
+            return
+
+        # pega o conjunto de frames do gif atual
+        frames = self.left_gif_sets[self.left_gif_index]
+        frame = frames[self.left_gif_frame_index]
+        self.left_gif_label.configure(image=frame)
+
+        # avança frame
+        self.left_gif_frame_index += 1
+
+        # se terminou os frames desse gif, volta ao início e troca de gif
+        if self.left_gif_frame_index >= len(frames):
+            self.left_gif_frame_index = 0
+            self.left_gif_index = (self.left_gif_index + 1) % len(self.left_gif_sets)
+
+        self.root.after(delay, self.animar_gifs_left)
 
     def animar_botao_click(self, botao, comando):
         # pequena animação visual ao clicar no botão
@@ -214,7 +300,7 @@ class ItemTrackerGUI:
             self.atualizar_status("📊 Agrupamento removido.", cor="#03a9f4")
         # re-renderiza a listagem
         self.listar_items()
-    
+
     def carregar_lista(self):
         # Abre um JSON e passa a usá-lo como base de dados.
         from tkinter import filedialog
@@ -357,42 +443,60 @@ class ItemTrackerGUI:
         dados = logica.carregar_dataframe()
 
         if dados.empty:
-            self.text_area.insert(
-                "end",
-                "📭 Nenhum item cadastrado ainda!\nAdicione items com ➕ Novo Item.",
-            )
-            self.atualizar_status("📭 Nenhum Item cadastrado.")
+            # se não há arquivo corrente, mostra mensagem de lista  não carregada.
+            if self.current_file is None:
+                self.text_area.insert(
+                    "end",
+                    "📂 Nenhum arquivo de lista carregado.\nUse '📂 Carregar lista' para abrir um JSON.",
+                )
+                self.atualizar_status("📂 Nenhuma lista carregada.")
+            else:
+                # arquivo carregado mas sem registros
+                self.text_area.insert(
+                    "end",
+                    "📭 Nenhum  item cadastrado ainda!\nAdicione items com '➕ Novo Item'. ",
+                    self.atualizar_status("📭 Nenhum Item cadastrado."),
+                )
             return
 
         # checa se é compatível com o modelo antigo de items
         colunas_df = set(dados.columns)
-        eh_item_like = {"nome", "nota", "status"}.issubset(colunas_df)
+        eh_item_like = {"nome", "nota", "status", "eps"}.issubset(colunas_df)
 
         # estilos / cores
 
-        self.text_area.tag_config(
-            "header",
-            justify="center",
-        )
+        self.text_area.tag_config("header", justify="center", background="#1a1a26")
         self.text_area.tag_config(
             "titulo_bloco",
             foreground="#ffffff",
         )
+
+        # tags de cor de grupo (texto)
 
         self.text_area.tag_config("completo", foreground="#4caf50")
         self.text_area.tag_config("assistindo", foreground="#03a9f4")
         self.text_area.tag_config("planejado", foreground="#ffa726")
         self.text_area.tag_config("dropado", foreground="#ef5350")
 
-        # se for "anime_like" e o usuario não escolheu 
-        # agrupamento customizado, usa o modo especial por 
+        # listrado de linhas (fundo)
+        self.text_area.tag_config("row_even", background="#181828")
+        self.text_area.tag_config("row_odd", background="#14141f")
+
+        # se for "anime_like" e o usuario não escolheu
+        # agrupamento customizado, usa o modo especial por
         # status; senão, cai no modo genérico
-        if eh_item_like and not self.group_field:
+        if eh_item_like:
             # visão agrupada por status
             grupos = logica.obter_grupos_items()
             linhas = []
             # cabeçalho geral
-            linhas.append(("📋 SEUS ITEMS:\n\n", ("header",)))
+            linhas.append(("📋 SEUS ITEMS:\n", ("header",)))
+
+            header_cols = (
+                " # NOME                                       | NOTA | EPS | STATUS"
+            )
+            linhas.append((header_cols + "\n", ()))
+            linhas.append(("-" * len(header_cols) + "\n", ()))
 
             for grupo in grupos:
                 status = grupo["status"]
@@ -405,9 +509,10 @@ class ItemTrackerGUI:
                 largura = max(len(titulo), 20)
                 linhas.append(("-" * largura + "\n", (status,)))
 
-                # linhas do bloco
-                for linha in grupo["linhas"]:
-                    linhas.append((linha + "\n", (status,)))
+                # linhas do bloco (listradas)
+                for idx, linha in enumerate(grupo["linhas"]):
+                    tag_row = "row_even" if idx % 2 == 0 else "row_odd"
+                    linhas.append((linha + "\n", (status, tag_row)))
                 linhas.append(("\n", None))
 
             # insere com animação leve (10 ms entre linhas)
@@ -468,7 +573,7 @@ class ItemTrackerGUI:
                 self.text_area.tag_config(tag_name, foreground=cor)
 
             # cabeçalho geral
-            self.text_area.insert("end", "📋 SEUS ITEMS :\n\n", ("header",))
+            self.text_area.insert("end", "📋 SEUS ITEMS :\n", ("header",))
 
             # monta linha de cabeçalho com alinhamento
             # monta cabeçalho
@@ -491,7 +596,8 @@ class ItemTrackerGUI:
                     "end", "-" * max(len(titulo_bloco), 20) + "\n", (tag_grupo,)
                 )
 
-                # linhas do grupo
+                # linhas do grupo (listradas)
+                row_idx = 0
                 for r in registros:
                     if str(r.get(col_grupo, "")) != valor_grupo:
                         continue
@@ -500,7 +606,9 @@ class ItemTrackerGUI:
                         valor = str(r.get(chave, ""))
                         partes.append(f"{valor:<{larguras[chave]}}")
                     linha = " | ".join(partes)
-                    self.text_area.insert("end", linha + "\n", (tag_grupo,))
+                    tag_row = "row_even" if row_idx % 2 == 0 else "row_odd"
+                    self.text_area.insert("end", linha + "\n", (tag_grupo, tag_row))
+                    row_idx += 1
 
             self.text_area.see("end")
             self.atualizar_status("✅ Items listados!", cor="#4caf50")
@@ -509,7 +617,7 @@ class ItemTrackerGUI:
         janela = ctk.CTkToplevel(self.root)
         janela.title("➕ Novo Item")
         janela.geometry("450x500")
-        janela.configure(fg_color="#1a1a2e")
+        janela.configure(fg_color="#14141f")
         janela.transient(self.root)
         janela.grab_set()
 
@@ -593,8 +701,93 @@ class ItemTrackerGUI:
         self.text_area.see("end")
         self.atualizar_status("📈 Estátísticas atualizadas!", cor="#ffff00")
 
+    def mostrar_grafico_stats(self):
+        # exibe um gráfico de barras para a coluna selecionada em 'Agrupar por'.
+        df = logica.carregar_dataframe()
+        if df.empty:
+            messagebox.showinfo("Estatísticas", "📭 Nenhum item cadastrado ainda.")
+            return
+
+        # coluna escolhida em 'Agrupar por'
+        coluna = self.group_field or self.group_var.get().strip()
+        if not coluna or coluna not in df.columns:
+            # tenta heurística: status, categoria, tag, primeira coluna object
+            for nome in ("status", "categoria", "tag"):
+                if nome in df.columns:
+                    coluna = nome
+                    break
+            if not coluna:
+                for col in df.columns:
+                    if df[col].dtype == object:
+                        coluna = col
+                        break
+        if not coluna or coluna not in df.columns:
+            messagebox.showwarning(
+                "Estatísticas",
+                "Não foi possível determinar uma coluna categórica para o gráfico.",
+            )
+            return
+
+        # contagens por valor
+        vc = df[coluna].astype(str).value_counts()
+        if vc.empty:
+            messagebox.showinfo("Estatísticas", f"Nenhum dado para coluna '{coluna}'.")
+            return
+
+        # cria figura do matplotlib
+        fig, ax = plt.subplots(figsize=(7, 4))
+        vc.plot(kind="bar", ax=ax, color="#03a9f4")
+        ax.set_title(f"Distribuição por '{coluna}'", fontsize=12)
+        ax.set_ylabel("Contagem")
+        ax.set_xlabel(coluna)
+        ax.grid(axis="y", alpha=0.3)
+
+        # melhora a leitura dos rótulos no eixo X
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
+
+        # ajusta margens para não cortar textos
+        fig.tight_layout()
+
+        # cria janela para o gráfico
+        top = ctk.CTkToplevel(self.root)
+        top.title(f"📊 Gráfico de '{coluna}'")
+        top.geometry("700x500")
+        top.configure(fg_color="#101018")
+
+        # garante que a janela de gráfico venha pra frente
+        top.lift()
+        top.focus_force()
+        top.attributes("-topmost", True)
+        top.after(100, lambda: top.attributes("-topmost", False))
+
+        canvas = FigureCanvasTkAgg(fig, master=top)
+        canvas.draw()
+        canvas_widget = canvas.get_tk_widget()
+        canvas_widget.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.atualizar_status(f"📊 Gráfico exibido para '{coluna}'.", cor="#03a9f4")
+
     def salvar_items(self):
-        logica.salvar_lista(logica.carregar_items())
+        # tenta atualizar a partir do texto atual, se for uma tabela genérica
+        conteudo = self.text_area.get("1.0", "end").strip()
+
+        # tenta detectar  se estamos no modo genérico (tabela com cabeçalho)
+        # procura a primeira linha que pareça um cabeçalho colunar (com " | ")
+        linhas = conteudo.splitlines()
+        tabela_linhas = [l for l in linhas if " | " in l]
+
+        if len(tabela_linhas) >= 2:
+            # primeiro é header, resto são dados
+            texto_tabela = "\n".join(tabela_linhas)
+            logica.salvar_tabela_generica(texto_tabela)
+            self.atualizar_status(
+                "💾 Alterações salvas a partir da tabela.", cor="#1567E2"
+            )
+        else:
+            # fallback
+            logica.salvar_lista(logica.carregar_items())
+            self.atualizar_status("💾 Salvo com sucesso (modo legado).", cor="#1567E2")
+
         # Atualiza output automaticamente
         self.listar_items()
         self.atualizar_status("💾 Salvo com sucesso!", cor="#1567E2")
@@ -603,7 +796,7 @@ class ItemTrackerGUI:
         janela = ctk.CTkToplevel(self.root)
         janela.title("❌ Excluir Item")
         janela.geometry("700x500")
-        janela.configure(fg_color="#1a1a2e")
+        janela.configure(fg_color="#14141f")
         janela.transient(self.root)
         janela.grab_set()
 
@@ -632,12 +825,25 @@ class ItemTrackerGUI:
             janela.protocol("WM_DELETE_WINDOW", janela.destroy)
             return
 
-        # escolhe coluna principal para exibir (nome, se existir; senão a primeira)
+        # escolhe coluna principal para exibir:
+        # 1) "nome" (case-sensitive, se existir;)
+        # 2) "NOME", se existir
+        # 3) outra coluna textual
+
         colunas = list(df.columns)
-        if "nome" in colunas:
-            col_principal = "nome"
+        col_principal = colunas[0]
+
+        # prioridade: qualquer coluna cujo nome (lower) seja "nome"
+        for cand in colunas:
+            if cand.lower() == "nome":
+                col_principal = cand
+                break
         else:
-            col_principal = colunas[0]
+            # se não achou 'nome', tenta achar uma coluna textual melhor que não seja eps.
+            for cand in colunas:
+                if cand.lower() not in ("eps", "nota", "status"):
+                    col_principal = cand
+                    break
 
         listbox = tk.Listbox(
             lista_frame,
@@ -704,7 +910,7 @@ class ItemTrackerGUI:
         janela = ctk.CTkToplevel(self.root)
         janela.title("💔 Item Dropado")
         janela.geometry("450x350")
-        janela.configure(fg_color="#1a1a2e")
+        janela.configure(fg_color="#14141f")
         janela.transient(self.root)
         janela.grab_set()
 
@@ -761,7 +967,7 @@ class ItemTrackerGUI:
         janela = ctk.CTkToplevel(self.root)
         janela.title("⏳ Planejar Item")
         janela.geometry("450x350")
-        janela.configure(fg_color="#1a1a2e")
+        janela.configure(fg_color="#14141f")
         janela.transient(self.root)
         janela.grab_set()
 
